@@ -22,11 +22,15 @@ module EvilQuery
 
     def posts
       author_id = @user.person_id
-      Post.joins("LEFT OUTER JOIN participations ON participations.target_id = posts.id AND " \
+      query = Post.joins("LEFT OUTER JOIN participations ON participations.target_id = posts.id AND " \
                  "participations.target_type = 'Post'")
           .where(::Participation.arel_table[:author_id].eq(author_id).or(Post.arel_table[:author_id].eq(author_id)))
           .order("posts.interacted_at DESC")
-          .distinct
+      if AppConfig.postgres?
+	query
+      else
+	query.distinct
+      end
     end
   end
 
@@ -86,7 +90,11 @@ module EvilQuery
     end
 
     def ids!(query)
-      fetch_ids!(query.for_a_stream(@max_time, @order), 'posts.id')
+      if AppConfig.postgres?
+        fetch_ids!(query.for_a_stream(@max_time, @order), "DISTINCT ON (posts.#{@order}, posts.id) posts.id")
+      else
+        fetch_ids!(query.for_a_stream(@max_time, @order), 'posts.id')
+      end
     end
   end
 

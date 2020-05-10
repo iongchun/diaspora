@@ -62,18 +62,28 @@ module Diaspora
 
     module QueryMethods
       def owned_or_visible_by_user(user)
-        with_visibility.where(
+        query = with_visibility.where(
           visible_by_user(user).or(arel_table[:public].eq(true)
                                      .or(arel_table[:author_id].eq(user.person_id)))
-        ).select("DISTINCT #{table_name}.*")
+        )
+        if AppConfig.postgres?
+	  query
+	else
+          query.select("DISTINCT #{table_name}.*")
+	end
       end
 
       def from_person_visible_by_user(user, person)
         return owned_by_user(user) if person == user.person
 
-        with_visibility.where(author_id: person.id).where(
+        query = with_visibility.where(author_id: person.id).where(
           visible_by_user(user).or(arel_table[:public].eq(true))
-        ).select("DISTINCT #{table_name}.*")
+	)
+        if AppConfig.postgres?
+	  query
+	else
+          query.select("DISTINCT #{table_name}.*")
+	end
       end
 
       def for_visible_shareable_sql(max_time, order, limit=15, types=Stream::Base::TYPES_OF_POST_IN_STREAM)
