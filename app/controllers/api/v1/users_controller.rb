@@ -76,7 +76,11 @@ module Api
       def posts
         person = Person.find_by!(guid: params[:user_id])
         posts_query = if private_read?
-                        current_user.posts_from(person, false)
+                        query = current_user.posts_from(person, false)
+                        if AppConfig.postgres?
+                          query = query.select("DISTINCT ON (posts.created_at,posts.id) posts.*")
+                        end
+                        query
                       else
                         Post.where(author_id: person.id, public: true)
                       end

@@ -73,7 +73,14 @@ module User::Querying
 
   def posts_from(person, with_order=true)
     base_query = Post.from_person_visible_by_user(self, person)
-    return base_query.order("posts.created_at desc") if with_order
+    if with_order
+      if AppConfig.postgres?
+        return base_query.order("posts.created_at desc,posts.id desc")
+          .select("DISTINCT ON (posts.created_at,posts.id) posts.*")
+      else
+        return base_query.order("posts.created_at desc")
+      end
+    end
 
     base_query
   end
