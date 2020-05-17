@@ -52,9 +52,13 @@ class Post < ApplicationRecord
   scope :all_public, -> { where(public: true) }
 
   scope :commented_by, ->(person)  {
-    select('DISTINCT posts.*')
-      .joins(:comments)
-      .where(:comments => {:author_id => person.id})
+    if AppConfig.postgres?
+      joins(:comments).where(:comments => {:author_id => person.id})
+    else
+      select('DISTINCT posts.*')
+        .joins(:comments)
+        .where(:comments => {:author_id => person.id})
+    end
   }
 
   scope :liked_by, ->(person) {

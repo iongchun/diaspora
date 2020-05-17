@@ -37,9 +37,17 @@ class Stream::Base
     Post.all
   end
 
+  def unique_posts(query)
+    if AppConfig.postgres?
+      query.select("DISTINCT ON (posts.#{order}, posts.id) posts.*")
+    else
+      query
+    end
+  end
+
   # @return [Array<Post>]
   def stream_posts
-    self.posts.for_a_stream(max_time, order, self.user).tap do |posts|
+    unique_posts(self.posts.for_a_stream(max_time, order, self.user)).tap do |posts|
       like_posts_for_stream!(posts) #some sql person could probably do this with joins.
     end
   end

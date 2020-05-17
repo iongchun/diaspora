@@ -15,8 +15,12 @@ module User::Querying
   def visible_shareables(klass, opts={})
     opts = prep_opts(klass, opts)
     shareable_ids = visible_shareable_ids(klass, opts)
-    klass.where(id: shareable_ids).select("DISTINCT #{klass.table_name}.*")
-      .limit(opts[:limit]).order(opts[:order_with_table])
+    query = klass.where(id: shareable_ids).limit(opts[:limit]).order(opts[:order_with_table])
+    if AppConfig.postgres?
+      query
+    else
+      query.select("DISTINCT #{klass.table_name}.*")
+    end
   end
 
   def visible_shareable_ids(klass, opts={})
@@ -95,36 +99,57 @@ module User::Querying
     shareable_from_others = construct_shareable_from_others_query(opts)
     shareable_from_self = construct_shareable_from_self_query(opts)
 
-    "(#{shareable_from_others.to_sql} LIMIT #{opts[:limit]}) " \
-    "UNION ALL (#{shareable_from_self.to_sql} LIMIT #{opts[:limit]}) " \
-    "ORDER BY #{opts[:order]} LIMIT #{opts[:limit]}"
+    if AppConfig.postgres?
+      query = opts[:klass].with_visibility # from others
+      query = query.with_aspects unless opts[:all_aspects?] # from self
+      query = ugly_select_clause(
+        query.where(shareable_from_self.or(shareable_from_others)),
+	opts
+      )
+      "#{query.to_sql} LIMIT #{opts[:limit]}"
+    else
+      query_from_others = ugly_select_clause(
+        opts[:klass].with_visibility.where(shareable_from_others),
+	opts
+      )
+      query_from_self = opts[:klass]
+      query_from_self = query_from_self.with_aspects unless opts[:all_aspects?]
+      query_from_self = ugly_select_clause(
+        query_from_self.where(shareable_from_self),
+	opts
+      )
+      "(#{query_from_others.to_sql} LIMIT #{opts[:limit]}) " \
+      "UNION ALL (#{query_from_self.to_sql} LIMIT #{opts[:limit]}) " \
+      "ORDER BY #{opts[:order]} LIMIT #{opts[:limit]}"
+    end
   end
 
   def construct_shareable_from_others_query(opts)
     logger.debug "[EVIL-QUERY] user.construct_shareable_from_others_query"
 
-    query = visible_shareables_query(posts_from_aspects_query(opts), opts)
+    conds = posts_from_aspects_query(opts)
+    conds = conds.and(visible_shareables_query(opts))
 
-    query = query.where(type: opts[:type]) unless opts[:klass] == Photo
+    conds = conds.and(opts[:klass].arel_table[:type].in(opts[:type])) unless opts[:klass] == Photo
 
-    ugly_select_clause(query, opts)
+    conds
   end
 
   # For PostgreSQL and MySQL/MariaDB we use a different query
   # see issue: https://github.com/diaspora/diaspora/issues/5014
   def posts_from_aspects_query(opts)
     if AppConfig.postgres?
-      opts[:klass].where(author_id: Person.in_aspects(opts[:by_members_of]).select("people.id"))
+      opts[:klass].arel_table[:author_id].in(
+        Arel.sql(Person.in_aspects(opts[:by_members_of]).select("people.id").to_sql)
+      )
     else
       person_ids = Person.connection.select_values(Person.in_aspects(opts[:by_members_of]).select("people.id").to_sql)
-      opts[:klass].where(author_id: person_ids)
+      opts[:klass].arel_table[:author_id].in(person_ids)
     end
   end
 
-  def visible_shareables_query(query, opts)
-    query.with_visibility.where(
-      visible_private_shareables(opts).or(opts[:klass].arel_table[:public].eq(true))
-    )
+  def visible_shareables_query(opts)
+    visible_private_shareables(opts).or(opts[:klass].arel_table[:public].eq(true))
   end
 
   def visible_private_shareables(opts)
@@ -134,24 +159,29 @@ module User::Querying
   end
 
   def construct_shareable_from_self_query(opts)
-    conditions = {author_id: person_id}
-    conditions[:type] = opts[:type] if opts.has_key?(:type)
-    query = opts[:klass].where(conditions)
+    conditions = opts[:klass].arel_table[:author_id].eq(person_id)
+    if opts.has_key?(:type)
+      conditions = conditions.and(opts[:klass].arel_table[:type].in(opts[:type]))
+    end
 
     unless opts[:all_aspects?]
-      query = query.with_aspects.where(
+      conditions = conditions.and(
         AspectVisibility.arel_table[:aspect_id].in(opts[:by_members_of])
           .or(opts[:klass].arel_table[:public].eq(true))
       )
     end
-
-    ugly_select_clause(query, opts)
+    conditions
   end
 
   def ugly_select_clause(query, opts)
     klass = opts[:klass]
     table = klass.table_name
-    select_clause = "DISTINCT %s.id, %s.updated_at AS updated_at, %s.created_at AS created_at" % [table, table, table]
+    if AppConfig.postgres?
+      select_clause = ""
+    else
+      select_clause = "DISTINCT "
+    end
+    select_clause += "%s.id, %s.updated_at AS updated_at, %s.created_at AS created_at" % [table, table, table]
     query.select(select_clause).order(opts[:order_with_table])
       .where(klass.arel_table[opts[:order_field]].lt(opts[:max_time]))
   end

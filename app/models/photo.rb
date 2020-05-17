@@ -143,6 +143,10 @@ class Photo < ApplicationRecord
              else
                Photo.where(author_id: person.id, public: true)
              end
-    photos.where(pending: false).order("created_at DESC")
+    if AppConfig.postgres?
+      photos.where(pending: false).order("created_at DESC,photos.id DESC").select("DISTINCT ON (created_at,photos.id) photos.*")
+    else
+      photos.where(pending: false).order("created_at DESC")
+    end
   end
 end

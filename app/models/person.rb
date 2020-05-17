@@ -87,7 +87,11 @@ class Person < ApplicationRecord
   }
 
   scope :unique_from_aspects, ->(aspect_ids, user) {
-    all_from_aspects(aspect_ids, user).select('DISTINCT people.*')
+    if AppConfig.postgres?
+      all_from_aspects(aspect_ids, user).order("people.id").select('DISTINCT ON (people.id) people.*')
+    else
+      all_from_aspects(aspect_ids, user).select('DISTINCT people.*')
+    end
   }
 
   #not defensive

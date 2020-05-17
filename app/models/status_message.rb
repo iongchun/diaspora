@@ -50,7 +50,11 @@ class StatusMessage < Post
   end
 
   def self.public_tag_stream(tag_ids)
-    all_public.select("DISTINCT #{table_name}.*").tag_stream(tag_ids)
+    if AppConfig.postgres?
+      all_public.tag_stream(tag_ids)
+    else
+      all_public.select("DISTINCT #{table_name}.*").tag_stream(tag_ids)
+    end
   end
 
   def self.tag_stream(tag_ids)

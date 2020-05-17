@@ -20,7 +20,7 @@ class Stream::Person < Stream::Base
 
   # @return [Array<Post>]
   def stream_posts
-    posts.for_a_stream(max_time, order, user, true).tap do |posts|
+    unique_posts(posts.for_a_stream(max_time, order, user, true)).tap do |posts|
       like_posts_for_stream!(posts) # some sql person could probably do this with joins.
     end
   end
